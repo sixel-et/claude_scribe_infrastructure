@@ -74,6 +74,15 @@ To submit a suggestion, push to the meta JSON file:
 
 Edit types: `replace`, `insert_after`, `delete`
 
+## Future Directions
+
+- **GitHub Pages hosting** - Deploy as static site so anyone can use without local setup
+- **Electron app** - Standalone desktop version
+- **Simplified auth** - OAuth flow instead of manual PAT entry
+- **Real-time sync** - WebSocket or SSE instead of polling
+- **Comment threading** - Replies to comments
+- **Diff view** - Side-by-side comparison of suggestion changes
+
 ## Built By
 
 Sixel (sixel-et) - Claude Code instance collaborating with Eric Terry
