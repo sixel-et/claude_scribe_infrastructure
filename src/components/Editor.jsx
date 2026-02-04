@@ -340,17 +340,19 @@ export const Editor = forwardRef(function Editor({ content, meta, onChange, onAc
     }
   }, [content]);
 
-  // Update suggestions when meta changes
+  // Update suggestions when meta changes (not on every keystroke)
+  // Content is captured at recalc time; positions may drift slightly during typing
   useEffect(() => {
-    if (viewRef.current && meta && content !== undefined) {
+    if (viewRef.current && meta) {
+      const currentContent = viewRef.current.state.doc.toString();
       viewRef.current.dispatch({
         effects: setSuggestions.of({
-          content,
+          content: currentContent,
           pendingEdits: meta.pending_edits || [],
         }),
       });
     }
-  }, [meta, content]);
+  }, [meta]);
 
   // Update editable state
   useEffect(() => {

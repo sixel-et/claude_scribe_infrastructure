@@ -6,19 +6,31 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyText, setReplyText] = useState('');
 
-  // Cache content ref for position lookups (don't recalc on every keystroke)
-  const contentRef = useRef(content);
-  if (content && content !== contentRef.current) {
-    // Only update ref when comments change, not on every keystroke
-    // This is a heuristic - update when content length changes significantly
-    if (Math.abs((content?.length || 0) - (contentRef.current?.length || 0)) > 100) {
-      contentRef.current = content;
+  // Cache for comment positions - only recalculate when content changes significantly
+  const positionCacheRef = useRef({ content: null, positions: new Map() });
+
+  // Get cached position for a comment anchor
+  const getPosition = (anchor) => {
+    if (!content || !anchor) return Infinity;
+
+    // Rebuild cache if content changed significantly
+    const cache = positionCacheRef.current;
+    if (cache.content !== content) {
+      // Only rebuild if length changed significantly (avoid recalc on small edits)
+      const lengthDiff = Math.abs((content?.length || 0) - (cache.content?.length || 0));
+      if (!cache.content || lengthDiff > 100) {
+        cache.content = content;
+        cache.positions = new Map();
+      }
     }
-  }
-  // Always update on first load
-  if (!contentRef.current && content) {
-    contentRef.current = content;
-  }
+
+    // Return cached position or calculate and cache
+    if (!cache.positions.has(anchor)) {
+      const pos = content.indexOf(anchor);
+      cache.positions.set(anchor, pos === -1 ? Infinity : pos);
+    }
+    return cache.positions.get(anchor);
+  };
 
   // Organize comments into threads, sorted by document position
   const { rootComments, repliesByParent, unresolvedCount } = useMemo(() => {
@@ -41,23 +53,16 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
       replies[parentId].sort((a, b) => new Date(a.created) - new Date(b.created));
     }
 
-    // Sort root comments by position in document (use cached content)
-    const getPosition = (comment) => {
-      const cachedContent = contentRef.current;
-      if (!cachedContent || !comment.anchor) return Infinity;
-      const pos = cachedContent.indexOf(comment.anchor);
-      return pos === -1 ? Infinity : pos;
-    };
-
-    roots.sort((a, b) => getPosition(a) - getPosition(b));
-    resolved.sort((a, b) => getPosition(a) - getPosition(b));
+    // Sort root comments by cached position
+    roots.sort((a, b) => getPosition(a.anchor) - getPosition(b.anchor));
+    resolved.sort((a, b) => getPosition(a.anchor) - getPosition(b.anchor));
 
     return {
       rootComments: [...roots, ...resolved],
       repliesByParent: replies,
       unresolvedCount: roots.length,
     };
-  }, [comments]);
+  }, [comments, content]);
 
   const unresolvedComments = rootComments.filter(c => !c.resolved);
   const resolvedComments = rootComments.filter(c => c.resolved);
