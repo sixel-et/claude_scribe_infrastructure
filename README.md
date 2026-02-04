@@ -1,6 +1,6 @@
 # Claude Scribe
 
-A collaborative markdown editor for human-AI writing. Humans edit directly; Claude submits suggestions via GitHub commits. GitHub is the persistence layer.
+A collaborative markdown editor for human-AI writing. Humans edit directly; AIs submit suggestions via GitHub commits. GitHub is the persistence layer.
 
 ## Architecture
 
