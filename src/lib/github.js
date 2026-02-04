@@ -33,7 +33,9 @@ export async function getFile(path) {
       throw new Error(`${path} is not a file`);
     }
 
-    const content = atob(response.data.content);
+    // Decode base64 to UTF-8 (atob only handles Latin-1)
+    const bytes = Uint8Array.from(atob(response.data.content), c => c.charCodeAt(0));
+    const content = new TextDecoder().decode(bytes);
     return {
       content,
       sha: response.data.sha,
@@ -51,12 +53,20 @@ export async function getFile(path) {
 export async function putFile(path, content, message, sha = null) {
   if (!isInitialized()) throw new Error('GitHub not initialized');
 
+  // Encode UTF-8 to base64 (btoa only handles Latin-1)
+  const bytes = new TextEncoder().encode(content);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+
   const params = {
     owner: repoOwner,
     repo: repoName,
     path,
     message,
-    content: btoa(content),
+    content: base64,
   };
 
   if (sha) {

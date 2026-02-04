@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, Decoration, WidgetType } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -182,7 +182,7 @@ class InsertedTextWidget extends WidgetType {
   }
 }
 
-export function Editor({ content, meta, onChange, onAcceptEdit, onRejectEdit, onSelectionChange, disabled }) {
+export const Editor = forwardRef(function Editor({ content, meta, onChange, onAcceptEdit, onRejectEdit, onSelectionChange, disabled }, ref) {
   const containerRef = useRef(null);
   const viewRef = useRef(null);
   const onChangeRef = useRef(onChange);
@@ -190,6 +190,36 @@ export function Editor({ content, meta, onChange, onAcceptEdit, onRejectEdit, on
   const suggestionsFieldRef = useRef(null);
   onChangeRef.current = onChange;
   onSelectionChangeRef.current = onSelectionChange;
+
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    setCursor(pos) {
+      if (viewRef.current) {
+        viewRef.current.dispatch({
+          selection: { anchor: pos },
+          scrollIntoView: true,
+        });
+        viewRef.current.focus();
+      }
+    },
+    setSelection(from, to) {
+      if (viewRef.current) {
+        viewRef.current.dispatch({
+          selection: { anchor: from, head: to },
+          scrollIntoView: true,
+        });
+        viewRef.current.focus();
+      }
+    },
+    focus() {
+      if (viewRef.current) {
+        viewRef.current.focus();
+      }
+    },
+    hasFocus() {
+      return viewRef.current?.hasFocus ?? false;
+    },
+  }), []);
 
   const handleAccept = useCallback((edit) => {
     if (onAcceptEdit) onAcceptEdit(edit);
@@ -271,8 +301,9 @@ export function Editor({ content, meta, onChange, onAcceptEdit, onRejectEdit, on
           '.cm-content': {
             color: '#f3f4f6',
           },
-          '.cm-cursor': {
-            borderLeftColor: '#f3f4f6',
+          '.cm-cursor, .cm-cursor-primary': {
+            borderLeftColor: '#fbbf24 !important',
+            borderLeftWidth: '2px !important',
           },
           '.cm-selectionBackground': {
             backgroundColor: '#4b5563 !important',
@@ -336,4 +367,4 @@ export function Editor({ content, meta, onChange, onAcceptEdit, onRejectEdit, on
       className="h-full w-full overflow-hidden"
     />
   );
-}
+});

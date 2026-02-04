@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useGitHub } from './hooks/useGitHub';
 import { useDocument } from './hooks/useDocument';
 import { AuthInput } from './components/AuthInput';
 import { DocPicker } from './components/DocPicker';
 import { Editor } from './components/Editor';
+import { MarkdownPreview } from './components/MarkdownPreview';
 import { SyncStatus } from './components/SyncStatus';
 import { CommentsPanel } from './components/CommentsPanel';
 import { StaleEditsPanel } from './components/StaleEditsPanel';
@@ -15,6 +16,9 @@ function App() {
   const [currentDoc, setCurrentDoc] = useState(null);
   const [selectedText, setSelectedText] = useState('');
   const [showComments, setShowComments] = useState(true);
+  const [showPreview, setShowPreview] = useState(false);
+  const editorRef = useRef(null);
+  const previewRef = useRef(null);
 
   const {
     content,
@@ -30,6 +34,80 @@ function App() {
     resolveComment,
     reload
   } = useDocument(currentDoc);
+
+  const handleNavigateToSource = useCallback((startPos, endPos) => {
+    if (editorRef.current) {
+      editorRef.current.setSelection(startPos, endPos);
+    }
+  }, []);
+
+  const handleTocNavigate = useCallback((offset) => {
+    if (editorRef.current) {
+      editorRef.current.setCursor(offset);
+    }
+    if (previewRef.current) {
+      previewRef.current.scrollToPosition(offset);
+    }
+  }, []);
+
+  const handleNavigateToAnchor = useCallback((anchorText) => {
+    if (!content || !anchorText) return;
+
+    const index = content.indexOf(anchorText);
+    if (index !== -1) {
+      if (editorRef.current) {
+        editorRef.current.setSelection(index, index + anchorText.length);
+      }
+      if (previewRef.current) {
+        previewRef.current.scrollToPosition(index);
+      }
+    }
+  }, [content]);
+
+  // Auto-refocus editor on keypress when document is open
+  useEffect(() => {
+    if (!currentDoc) return;
+
+    const handleKeyDown = (e) => {
+      // Skip if already focused on editor, or in an input/textarea
+      if (editorRef.current?.hasFocus()) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.target.isContentEditable) return;
+
+      // Skip modifier-only keys
+      if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') return;
+
+      // For printable characters or space, refocus editor and let it handle the key
+      const isPrintable = e.key.length === 1;
+      const isSpace = e.key === ' ';
+      const isBackspace = e.key === 'Backspace';
+      const isDelete = e.key === 'Delete';
+      const isEnter = e.key === 'Enter';
+      const isArrow = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key);
+
+      if (isPrintable || isSpace || isBackspace || isDelete || isEnter || isArrow) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (editorRef.current) {
+          editorRef.current.focus();
+
+          // For printable characters, insert them
+          if (isPrintable || isSpace) {
+            // Small delay to ensure focus, then simulate the keypress
+            setTimeout(() => {
+              if (editorRef.current?.hasFocus()) {
+                document.execCommand('insertText', false, e.key);
+              }
+            }, 0);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [currentDoc]);
 
   const handleCreateDoc = useCallback(async (path) => {
     try {
@@ -81,10 +159,17 @@ function App() {
                 error={docError}
               />
               <button
+                onClick={() => setShowPreview(!showPreview)}
+                className={`text-sm px-2 py-1 rounded ${showPreview ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                title="Toggle preview (click preview to jump to source)"
+              >
+                Preview
+              </button>
+              <button
                 onClick={() => setShowComments(!showComments)}
                 className={`text-sm px-2 py-1 rounded ${showComments ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
               >
-                💬 {commentCount > 0 && <span className="ml-1">{commentCount}</span>}
+                Comments {commentCount > 0 && <span className="ml-1">{commentCount}</span>}
               </button>
             </>
           )}
@@ -103,8 +188,10 @@ function App() {
         <aside className="w-64 bg-gray-800 border-r border-gray-700 flex-shrink-0">
           <DocPicker
             currentDoc={currentDoc}
+            currentDocContent={content}
             onSelect={setCurrentDoc}
             onCreateDoc={handleCreateDoc}
+            onNavigateToHeader={handleTocNavigate}
           />
         </aside>
 
@@ -130,16 +217,28 @@ function App() {
                     </div>
                   ) : (
                     <>
-                      <div className="flex-1 overflow-hidden">
-                        <Editor
-                          content={content}
-                          meta={meta}
-                          onChange={updateContent}
-                          onAcceptEdit={acceptEdit}
-                          onRejectEdit={rejectEdit}
-                          onSelectionChange={setSelectedText}
-                          disabled={isSaving}
-                        />
+                      <div className="flex-1 overflow-hidden flex">
+                        <div className={`overflow-hidden ${showPreview ? 'w-1/2 border-r border-gray-700' : 'w-full'}`}>
+                          <Editor
+                            ref={editorRef}
+                            content={content}
+                            meta={meta}
+                            onChange={updateContent}
+                            onAcceptEdit={acceptEdit}
+                            onRejectEdit={rejectEdit}
+                            onSelectionChange={setSelectedText}
+                            disabled={isSaving}
+                          />
+                        </div>
+                        {showPreview && (
+                          <div className="w-1/2 overflow-hidden">
+                            <MarkdownPreview
+                              ref={previewRef}
+                              content={content}
+                              onNavigateToSource={handleNavigateToSource}
+                            />
+                          </div>
+                        )}
                       </div>
                       <StaleEditsPanel
                         content={content}
@@ -158,6 +257,8 @@ function App() {
                       selectedText={selectedText}
                       onAddComment={addComment}
                       onResolveComment={resolveComment}
+                      onNavigateToAnchor={handleNavigateToAnchor}
+                      content={content}
                     />
                   </div>
                 )}

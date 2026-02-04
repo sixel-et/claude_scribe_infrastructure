@@ -22,10 +22,12 @@ export function useDocument(docPath) {
   const metaRef = useRef(meta);
   const shaRef = useRef(sha);
   const metaShaRef = useRef(metaSha);
+  const isDirtyRef = useRef(isDirty);
   contentRef.current = content;
   metaRef.current = meta;
   shaRef.current = sha;
   metaShaRef.current = metaSha;
+  isDirtyRef.current = isDirty;
 
   // Load document
   const load = useCallback(async () => {
@@ -69,7 +71,7 @@ export function useDocument(docPath) {
 
   // Save document
   const save = useCallback(async () => {
-    if (!docPath || !isDirty) return;
+    if (!docPath || !isDirtyRef.current) return;
 
     setIsSaving(true);
     setError(null);
@@ -90,7 +92,7 @@ export function useDocument(docPath) {
     } finally {
       setIsSaving(false);
     }
-  }, [docPath, isDirty]);
+  }, [docPath]);
 
   // Update content (local only, triggers autosave)
   const updateContent = useCallback((newContent) => {
@@ -181,8 +183,8 @@ export function useDocument(docPath) {
     }
   }, [docPath]);
 
-  // Add a comment
-  const addComment = useCallback(async (anchor, text) => {
+  // Add a comment (or reply if parentId is provided)
+  const addComment = useCallback(async (anchor, text, parentId = null) => {
     if (!docPath) return;
 
     setIsSaving(true);
@@ -196,6 +198,7 @@ export function useDocument(docPath) {
         text,
         created: new Date().toISOString(),
         resolved: false,
+        ...(parentId && { parentId }),
       };
 
       const newMeta = {

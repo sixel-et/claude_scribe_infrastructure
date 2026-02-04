@@ -1,11 +1,66 @@
-import { useState } from 'react';
+import { useState, useMemo, useRef } from 'react';
 
-export function CommentsPanel({ comments, onAddComment, onResolveComment, selectedText }) {
+export function CommentsPanel({ comments, onAddComment, onResolveComment, selectedText, onNavigateToAnchor, content }) {
   const [newCommentText, setNewCommentText] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState('');
 
-  const unresolvedComments = (comments || []).filter(c => !c.resolved);
-  const resolvedComments = (comments || []).filter(c => c.resolved);
+  // Cache content ref for position lookups (don't recalc on every keystroke)
+  const contentRef = useRef(content);
+  if (content && content !== contentRef.current) {
+    // Only update ref when comments change, not on every keystroke
+    // This is a heuristic - update when content length changes significantly
+    if (Math.abs((content?.length || 0) - (contentRef.current?.length || 0)) > 100) {
+      contentRef.current = content;
+    }
+  }
+  // Always update on first load
+  if (!contentRef.current && content) {
+    contentRef.current = content;
+  }
+
+  // Organize comments into threads, sorted by document position
+  const { rootComments, repliesByParent, unresolvedCount } = useMemo(() => {
+    const allComments = comments || [];
+    const roots = allComments.filter(c => !c.parentId && !c.resolved);
+    const resolved = allComments.filter(c => !c.parentId && c.resolved);
+    const replies = {};
+
+    for (const comment of allComments) {
+      if (comment.parentId) {
+        if (!replies[comment.parentId]) {
+          replies[comment.parentId] = [];
+        }
+        replies[comment.parentId].push(comment);
+      }
+    }
+
+    // Sort replies by date
+    for (const parentId of Object.keys(replies)) {
+      replies[parentId].sort((a, b) => new Date(a.created) - new Date(b.created));
+    }
+
+    // Sort root comments by position in document (use cached content)
+    const getPosition = (comment) => {
+      const cachedContent = contentRef.current;
+      if (!cachedContent || !comment.anchor) return Infinity;
+      const pos = cachedContent.indexOf(comment.anchor);
+      return pos === -1 ? Infinity : pos;
+    };
+
+    roots.sort((a, b) => getPosition(a) - getPosition(b));
+    resolved.sort((a, b) => getPosition(a) - getPosition(b));
+
+    return {
+      rootComments: [...roots, ...resolved],
+      repliesByParent: replies,
+      unresolvedCount: roots.length,
+    };
+  }, [comments]);
+
+  const unresolvedComments = rootComments.filter(c => !c.resolved);
+  const resolvedComments = rootComments.filter(c => c.resolved);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -13,6 +68,15 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
       onAddComment(selectedText, newCommentText.trim());
       setNewCommentText('');
       setIsAdding(false);
+    }
+  };
+
+  const handleReply = (e, parentComment) => {
+    e.preventDefault();
+    if (replyText.trim()) {
+      onAddComment(parentComment.anchor, replyText.trim(), parentComment.id);
+      setReplyText('');
+      setReplyingTo(null);
     }
   };
 
@@ -79,10 +143,17 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
         ) : (
           <>
             {unresolvedComments.map((comment) => (
-              <CommentCard
+              <CommentThread
                 key={comment.id}
                 comment={comment}
+                replies={repliesByParent[comment.id] || []}
                 onResolve={() => onResolveComment(comment.id)}
+                replyingTo={replyingTo}
+                setReplyingTo={setReplyingTo}
+                replyText={replyText}
+                setReplyText={setReplyText}
+                onReply={(e) => handleReply(e, comment)}
+                onNavigateToAnchor={onNavigateToAnchor}
               />
             ))}
 
@@ -93,10 +164,12 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
                 </summary>
                 <div className="mt-2 space-y-2 opacity-60">
                   {resolvedComments.map((comment) => (
-                    <CommentCard
+                    <CommentThread
                       key={comment.id}
                       comment={comment}
+                      replies={repliesByParent[comment.id] || []}
                       resolved
+                      onNavigateToAnchor={onNavigateToAnchor}
                     />
                   ))}
                 </div>
@@ -109,8 +182,74 @@ export function CommentsPanel({ comments, onAddComment, onResolveComment, select
   );
 }
 
-function CommentCard({ comment, onResolve, resolved }) {
+function CommentThread({ comment, replies, onResolve, resolved, replyingTo, setReplyingTo, replyText, setReplyText, onReply, onNavigateToAnchor }) {
+  const isReplying = replyingTo === comment.id;
+
+  return (
+    <div className="space-y-2">
+      <CommentCard
+        comment={comment}
+        onResolve={onResolve}
+        resolved={resolved}
+        onReplyClick={!resolved && setReplyingTo ? () => setReplyingTo(comment.id) : null}
+        onNavigateToAnchor={onNavigateToAnchor}
+      />
+
+      {/* Replies */}
+      {replies.length > 0 && (
+        <div className="ml-4 pl-2 border-l-2 border-gray-600 space-y-2">
+          {replies.map((reply) => (
+            <CommentCard
+              key={reply.id}
+              comment={reply}
+              resolved={resolved}
+              isReply
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Reply form */}
+      {isReplying && (
+        <form onSubmit={onReply} className="ml-4 pl-2 border-l-2 border-blue-500 space-y-2">
+          <textarea
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            placeholder="Write a reply..."
+            className="w-full px-2 py-1 text-sm bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-none"
+            rows={2}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={!replyText.trim()}
+              className="flex-1 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              Reply
+            </button>
+            <button
+              type="button"
+              onClick={() => { setReplyingTo(null); setReplyText(''); }}
+              className="flex-1 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-500"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function CommentCard({ comment, onResolve, resolved, onReplyClick, isReply, onNavigateToAnchor }) {
   const isHuman = comment.author === 'human';
+
+  const handleAnchorClick = () => {
+    if (onNavigateToAnchor && comment.anchor) {
+      onNavigateToAnchor(comment.anchor);
+    }
+  };
 
   return (
     <div className={`p-2 rounded text-sm ${resolved ? 'bg-gray-700/50' : 'bg-gray-700'}`}>
@@ -123,20 +262,36 @@ function CommentCard({ comment, onResolve, resolved }) {
         </span>
       </div>
 
-      <div className="text-xs text-gray-400 italic mb-1 truncate" title={comment.anchor}>
-        on: "{comment.anchor?.slice(0, 40)}{comment.anchor?.length > 40 ? '...' : ''}"
-      </div>
+      {!isReply && (
+        <div
+          className="text-xs text-gray-400 italic mb-1 truncate cursor-pointer hover:text-blue-400"
+          title={`Click to jump to: ${comment.anchor}`}
+          onClick={handleAnchorClick}
+        >
+          on: "{comment.anchor?.slice(0, 40)}{comment.anchor?.length > 40 ? '...' : ''}"
+        </div>
+      )}
 
       <div className="text-gray-200">{comment.text}</div>
 
-      {!resolved && onResolve && (
-        <button
-          onClick={onResolve}
-          className="mt-2 text-xs text-gray-400 hover:text-white"
-        >
-          ✓ Resolve
-        </button>
-      )}
+      <div className="flex gap-3 mt-2">
+        {!resolved && onResolve && (
+          <button
+            onClick={onResolve}
+            className="text-xs text-gray-400 hover:text-white"
+          >
+            ✓ Resolve
+          </button>
+        )}
+        {onReplyClick && (
+          <button
+            onClick={onReplyClick}
+            className="text-xs text-gray-400 hover:text-white"
+          >
+            ↩ Reply
+          </button>
+        )}
+      </div>
     </div>
   );
 }

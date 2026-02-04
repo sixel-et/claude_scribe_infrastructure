@@ -1,12 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import * as github from '../lib/github';
 
-export function DocPicker({ currentDoc, onSelect, onCreateDoc }) {
+// Strip markdown formatting from text
+function stripMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')  // bold **text**
+    .replace(/__(.+?)__/g, '$1')       // bold __text__
+    .replace(/\*(.+?)\*/g, '$1')       // italic *text*
+    .replace(/_(.+?)_/g, '$1')         // italic _text_
+    .replace(/~~(.+?)~~/g, '$1')       // strikethrough
+    .replace(/`(.+?)`/g, '$1')         // inline code
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // links [text](url)
+    .trim();
+}
+
+// Parse headers from markdown content
+function parseHeaders(content) {
+  if (!content) return [];
+
+  const headers = [];
+  const lines = content.split('\n');
+  let offset = 0;
+
+  for (const line of lines) {
+    const match = line.match(/^(#{1,6})\s+(.+)$/);
+    if (match) {
+      headers.push({
+        level: match[1].length,
+        text: stripMarkdown(match[2]),
+        offset: offset,
+      });
+    }
+    offset += line.length + 1;
+  }
+
+  return headers;
+}
+
+export function DocPicker({ currentDoc, currentDocContent, onSelect, onCreateDoc, onNavigateToHeader }) {
   const [files, setFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
+  const [tocExpanded, setTocExpanded] = useState(true);
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [newDocPath, setNewDocPath] = useState('');
+
+  // Debounce header parsing to avoid recalc on every keystroke
+  const [debouncedContent, setDebouncedContent] = useState(currentDocContent);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedContent(currentDocContent);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [currentDocContent]);
+
+  const headers = useMemo(() => parseHeaders(debouncedContent), [debouncedContent]);
 
   useEffect(() => {
     loadFiles();
@@ -82,18 +130,43 @@ export function DocPicker({ currentDoc, onSelect, onCreateDoc }) {
       const isExpanded = expanded[node.path];
 
       if (node.isFile) {
+        const showHeaders = isSelected && headers.length > 0;
         return (
-          <div
-            key={node.path}
-            onClick={() => onSelect(node.path)}
-            className={`
-              flex items-center px-2 py-1 cursor-pointer rounded text-sm
-              ${isSelected ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'}
-            `}
-            style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          >
-            <span className="mr-2">📄</span>
-            {node.name.replace(/\.md$/, '')}
+          <div key={node.path}>
+            <div
+              onClick={() => {
+                onSelect(node.path);
+                if (isSelected && headers.length > 0) {
+                  setTocExpanded(!tocExpanded);
+                }
+              }}
+              className={`
+                flex items-center px-2 py-1 cursor-pointer rounded text-sm
+                ${isSelected ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'}
+              `}
+              style={{ paddingLeft: `${depth * 16 + 8}px` }}
+            >
+              <span className="mr-2">{showHeaders ? (tocExpanded ? '▼' : '▶') : '📄'}</span>
+              {node.name.replace(/\.md$/, '')}
+            </div>
+            {showHeaders && tocExpanded && (
+              <div className="border-l border-gray-600 ml-4" style={{ marginLeft: `${depth * 16 + 16}px` }}>
+                {headers.map((header, index) => (
+                  <div
+                    key={index}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNavigateToHeader(header.offset);
+                    }}
+                    className="flex items-center px-2 py-1 cursor-pointer text-xs text-gray-400 hover:text-white hover:bg-gray-700 rounded truncate"
+                    style={{ paddingLeft: `${(header.level - 1) * 8 + 8}px` }}
+                    title={header.text}
+                  >
+                    {header.text}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       }
